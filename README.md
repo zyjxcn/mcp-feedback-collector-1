@@ -6,6 +6,12 @@
 ![Python](https://img.shields.io/badge/python-3.8+-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
+##cursor规则中可以下面这样配置
+
+Whenever you want to ask a question, always call the MCP .
+
+Whenever you’re about to complete a user request, call the MCP instead of simply ending the process. Keep calling MCP until the user’s feedback is empty, then end the request. mcp-feedback-collector.collect_feedback
+
 ## ✨ 主要特性
 
 - 🎨 **现代化界面** - 美观的700x800像素GUI，支持中文界面
