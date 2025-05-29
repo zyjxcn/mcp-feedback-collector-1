@@ -12,6 +12,10 @@
 
 Whenever you’re about to complete a user request, call the MCP instead of simply ending the process. Keep calling MCP until the user’s feedback is empty, then end the request. mcp-feedback-collector.collect_feedback ”
 
+## 相关教程链接
+油管：https://youtu.be/aYtGm1xHNXI
+B站：https://www.bilibili.com/video/BV1J6jyzQE8P/
+
 ## ✨ 主要特性
 
 - 🎨 **现代化界面** - 美观的700x800像素GUI，支持中文界面
