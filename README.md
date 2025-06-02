@@ -15,7 +15,8 @@ Whenever you’re about to complete a user request, call the MCP instead of simp
 ## 相关教程链接
 油管：https://youtu.be/aYtGm1xHNXI
 B站：https://www.bilibili.com/video/BV1J6jyzQE8P/
-已经推出了nodejs的版本， https://github.com/sanshao85/mcp-feedback-collector-web 
+## 已经推出了nodejs的版本
+https://github.com/sanshao85/mcp-feedback-collector-web 
 支持远程服务器使用，体验更强大！
 
 ## ✨ 主要特性
