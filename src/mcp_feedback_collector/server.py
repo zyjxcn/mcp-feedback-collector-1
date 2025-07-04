@@ -13,6 +13,8 @@ import queue
 from pathlib import Path
 from datetime import datetime
 import os
+import markdown
+import re
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.utilities.types import Image as MCPImage
@@ -53,7 +55,7 @@ class FeedbackDialog:
                 pass
             
             # 居中显示窗口
-            self.root.eval('tk::PlaceWindow . center')
+            self.center_window()
             
             # 创建界面
             self.create_widgets()
@@ -72,6 +74,15 @@ class FeedbackDialog:
             return result
         except queue.Empty:
             return None
+    
+    def center_window(self):
+        """将窗口居中显示在屏幕中央"""
+        self.root.update_idletasks()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
             
     def create_widgets(self):
         """创建美化的界面组件"""
@@ -79,31 +90,61 @@ class FeedbackDialog:
         main_frame = tk.Frame(self.root, bg="#f5f5f5")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
-        # 标题
-        title_label = tk.Label(
-            main_frame,
-            text="🎯 工作完成汇报与反馈收集",
-            font=("Microsoft YaHei", 16, "bold"),
-            bg="#f5f5f5",
-            fg="#2c3e50"
-        )
-        title_label.pack(pady=(0, 20))
+        # 删除标题标签以节省空间
         
-        # 1. 工作汇报区域
+        # 1. 工作汇报区域（增加高度）
         report_frame = tk.LabelFrame(
             main_frame, 
-            text="📋 AI工作完成汇报", 
+            text="📋 AI 完成汇报", 
             font=("Microsoft YaHei", 12, "bold"),
             bg="#ffffff",
-            fg="#34495e",
+            fg="#2c3e50",
             relief=tk.RAISED,
             bd=2
         )
-        report_frame.pack(fill=tk.X, pady=(0, 15))
+        report_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
         
-        report_text = tk.Text(
-            report_frame, 
-            height=5, 
+        # 在标题右侧添加深色主题切换按钮（缩小并移到框架最顶部）
+        self.is_dark_theme = False  # 主题状态
+        self.theme_btn = tk.Button(
+            report_frame,
+            text="🌙",
+            command=self.toggle_theme,
+            font=("Microsoft YaHei", 10, "bold"),
+            bg="#ecf0f1",
+            fg="#34495e",
+            width=2,
+            height=1,
+            relief=tk.RAISED,
+            bd=1,
+            cursor="hand2",
+            activebackground="#d5dbdb",
+            activeforeground="#2c3e50"
+        )
+        self.theme_btn.place(relx=1.0, rely=0, anchor="ne", x=-5, y=-28)
+        
+        # 保存主要组件引用以便主题切换
+        self.main_frame = main_frame
+        self.report_frame = report_frame
+        
+        # 创建可调整大小的容器
+        report_paned = tk.PanedWindow(
+            report_frame,
+            orient=tk.VERTICAL,
+            bg="#ffffff",
+            sashwidth=8,
+            sashrelief=tk.RAISED,
+            sashpad=2
+        )
+        report_paned.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+        
+        # 创建文本容器框架
+        text_container = tk.Frame(report_paned, bg="#ffffff")
+        
+        # 创建可调整大小的文本组件（支持Markdown）
+        self.report_text = tk.Text(
+            text_container, 
+            height=5,  # 初始高度
             wrap=tk.WORD, 
             bg="#ecf0f1", 
             fg="#2c3e50",
@@ -112,29 +153,33 @@ class FeedbackDialog:
             bd=5,
             state=tk.DISABLED
         )
-        report_text.pack(fill=tk.X, padx=15, pady=15)
+        self.report_text.pack(fill=tk.BOTH, expand=True)
         
-        # 显示工作汇报内容
-        report_text.config(state=tk.NORMAL)
-        report_text.insert(tk.END, self.work_summary or "本次对话中完成的工作内容...")
-        report_text.config(state=tk.DISABLED)
+        # 添加到PanedWindow（增加初始高度）
+        report_paned.add(text_container, minsize=100, height=200)
         
-        # 2. 用户反馈文本区域
-        feedback_frame = tk.LabelFrame(
+        # 配置Markdown样式标签
+        self.setup_markdown_tags()
+        
+        # 显示工作汇报内容（支持Markdown）
+        self.set_markdown_content(self.work_summary or "本次对话中完成的工作内容...")
+        
+        # 2. 用户反馈文本区域（减小高度）
+        self.feedback_frame = tk.LabelFrame(
             main_frame, 
-            text="💬 您的文字反馈（可选）", 
+            text="✍️ 您的反馈", 
             font=("Microsoft YaHei", 12, "bold"),
             bg="#ffffff",
             fg="#34495e",
             relief=tk.RAISED,
             bd=2
         )
-        feedback_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        self.feedback_frame.pack(fill=tk.X, expand=False, pady=(0, 15))
         
-        # 文本输入框
+        # 文本输入框（减小高度）
         self.text_widget = scrolledtext.ScrolledText(
-            feedback_frame, 
-            height=6, 
+            self.feedback_frame, 
+            height=4, 
             wrap=tk.WORD,
             font=("Microsoft YaHei", 10),
             bg="#ffffff",
@@ -143,12 +188,35 @@ class FeedbackDialog:
             bd=5,
             insertbackground="#3498db"
         )
-        self.text_widget.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+        self.text_widget.pack(fill=tk.X, expand=False, padx=15, pady=15)
         self.text_widget.insert(tk.END, "请在此输入您的反馈、建议或问题...")
         self.text_widget.bind("<FocusIn>", self.clear_placeholder)
         
-        # 3. 图片选择区域
-        image_frame = tk.LabelFrame(
+        # 3. 图片选择区域（默认隐藏，点击标题切换显示）
+        self.image_frame_visible = False  # 图片区域显示状态
+        
+        # 创建可点击的标题框架
+        self.image_title_frame = tk.Frame(main_frame, bg="#f5f5f5")
+        self.image_title_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        # 可点击的图片反馈标题
+        self.image_title_label = tk.Label(
+            self.image_title_frame,
+            text="🖼️ 图片反馈（点击展开/收起）",
+            font=("Microsoft YaHei", 12, "bold"),
+            bg="#ecf0f1",
+            fg="#34495e",
+            relief=tk.RAISED,
+            bd=2,
+            cursor="hand2",
+            padx=10,
+            pady=5
+        )
+        self.image_title_label.pack(fill=tk.X)
+        self.image_title_label.bind("<Button-1>", self.toggle_image_frame)
+        
+        # 图片选择区域（初始隐藏）
+        self.image_frame = tk.LabelFrame(
             main_frame, 
             text="🖼️ 图片反馈（可选，支持多张）", 
             font=("Microsoft YaHei", 12, "bold"),
@@ -157,118 +225,366 @@ class FeedbackDialog:
             relief=tk.RAISED,
             bd=2
         )
-        image_frame.pack(fill=tk.X, pady=(0, 15))
+        # 初始不显示
         
         # 图片操作按钮
-        btn_frame = tk.Frame(image_frame, bg="#ffffff")
-        btn_frame.pack(fill=tk.X, padx=15, pady=10)
+        self.btn_frame = tk.Frame(self.image_frame, bg="#ffffff")
+        self.btn_frame.pack(fill=tk.X, padx=15, pady=10)
         
-        # 美化的按钮样式
+        # 缩小的按钮样式（与提交取消按钮一致）
         btn_style = {
-            "font": ("Microsoft YaHei", 10, "bold"),
+            "font": ("Microsoft YaHei", 8, "bold"),
             "relief": tk.FLAT,
             "bd": 0,
             "cursor": "hand2",
-            "height": 2
+            "height": 1
         }
         
-        tk.Button(
-            btn_frame,
+        self.select_file_btn = tk.Button(
+            self.btn_frame,
             text="📁 选择图片文件",
             command=self.select_image_file,
             bg="#3498db",
             fg="white",
-            width=15,
+            width=12,
             **btn_style
-        ).pack(side=tk.LEFT, padx=(0, 8))
+        )
+        self.select_file_btn.pack(side=tk.LEFT, padx=(0, 8))
         
-        tk.Button(
-            btn_frame,
+        self.paste_btn = tk.Button(
+            self.btn_frame,
             text="📋 从剪贴板粘贴",
             command=self.paste_from_clipboard,
             bg="#2ecc71",
             fg="white",
-            width=15,
+            width=12,
             **btn_style
-        ).pack(side=tk.LEFT, padx=4)
+        )
+        self.paste_btn.pack(side=tk.LEFT, padx=4)
         
-        tk.Button(
-            btn_frame,
+        self.clear_btn = tk.Button(
+            self.btn_frame,
             text="❌ 清除所有图片",
             command=self.clear_all_images,
             bg="#e74c3c",
             fg="white",
-            width=15,
+            width=12,
             **btn_style
-        ).pack(side=tk.LEFT, padx=8)
+        )
+        self.clear_btn.pack(side=tk.LEFT, padx=8)
         
         # 图片预览区域（支持滚动）
-        preview_container = tk.Frame(image_frame, bg="#ffffff")
-        preview_container.pack(fill=tk.X, padx=15, pady=(0, 15))
+        self.preview_container = tk.Frame(self.image_frame, bg="#ffffff")
+        self.preview_container.pack(fill=tk.X, padx=15, pady=(0, 15))
         
         # 创建滚动画布
-        canvas = tk.Canvas(preview_container, height=120, bg="#f8f9fa", relief=tk.SUNKEN, bd=1)
-        scrollbar = tk.Scrollbar(preview_container, orient="horizontal", command=canvas.xview)
-        self.image_preview_frame = tk.Frame(canvas, bg="#f8f9fa")
+        self.canvas = tk.Canvas(self.preview_container, height=120, bg="#f8f9fa", relief=tk.SUNKEN, bd=1)
+        self.scrollbar = tk.Scrollbar(self.preview_container, orient="horizontal", command=self.canvas.xview)
+        self.image_preview_frame = tk.Frame(self.canvas, bg="#f8f9fa")
         
         self.image_preview_frame.bind(
             "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
         
-        canvas.create_window((0, 0), window=self.image_preview_frame, anchor="nw")
-        canvas.configure(xscrollcommand=scrollbar.set)
+        self.canvas.create_window((0, 0), window=self.image_preview_frame, anchor="nw")
+        self.canvas.configure(xscrollcommand=self.scrollbar.set)
         
-        canvas.pack(side="top", fill="x")
-        scrollbar.pack(side="bottom", fill="x")
+        self.canvas.pack(side="top", fill="x")
+        self.scrollbar.pack(side="bottom", fill="x")
         
         # 初始提示
         self.update_image_preview()
         
-        # 4. 操作按钮
-        button_frame = tk.Frame(main_frame, bg="#f5f5f5")
-        button_frame.pack(fill=tk.X, pady=(15, 0))
+        # 4. 底部区域（左下角提示文字 + 右下角按钮）
+        self.bottom_frame = tk.Frame(main_frame, bg="#f5f5f5")
+        self.bottom_frame.pack(fill=tk.X, pady=(15, 0))
         
-        # 主要操作按钮
-        submit_btn = tk.Button(
-            button_frame,
-            text="✅ 提交反馈",
-            command=self.submit_feedback,
-            font=("Microsoft YaHei", 12, "bold"),
-            bg="#27ae60",
-            fg="white",
-            width=18,
-            height=2,
-            relief=tk.FLAT,
-            bd=0,
-            cursor="hand2"
-        )
-        submit_btn.pack(side=tk.LEFT, padx=(0, 15))
-        
-        cancel_btn = tk.Button(
-            button_frame,
-            text="❌ 取消",
-            command=self.cancel,
-            font=("Microsoft YaHei", 12),
-            bg="#95a5a6",
-            fg="white",
-            width=18,
-            height=2,
-            relief=tk.FLAT,
-            bd=0,
-            cursor="hand2"
-        )
-        cancel_btn.pack(side=tk.LEFT)
-        
-        # 说明文字
-        info_label = tk.Label(
-            main_frame,
+        # 左下角提示信息
+        self.info_label = tk.Label(
+            self.bottom_frame,
             text="💡 提示：您可以只提供文字反馈、只提供图片，或者两者都提供（支持多张图片）",
             font=("Microsoft YaHei", 9),
             fg="#7f8c8d",
             bg="#f5f5f5"
         )
-        info_label.pack(pady=(15, 0))
+        self.info_label.pack(side=tk.LEFT, anchor="w")
+        
+        # 右下角按钮区域
+        self.button_frame = tk.Frame(self.bottom_frame, bg="#f5f5f5")
+        self.button_frame.pack(side=tk.RIGHT, anchor="e")
+        
+        # 主要操作按钮
+        self.submit_btn = tk.Button(
+            self.button_frame,
+            text="✅ 提交反馈",
+            command=self.submit_feedback,
+            font=("Microsoft YaHei", 10, "bold"),
+            bg="#27ae60",
+            fg="white",
+            width=9,
+            height=1,
+            relief=tk.FLAT,
+            bd=0,
+            cursor="hand2"
+        )
+        self.submit_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.cancel_btn = tk.Button(
+            self.button_frame,
+            text="❌ 取消",
+            command=self.cancel,
+            font=("Microsoft YaHei", 10),
+            bg="#95a5a6",
+            fg="white",
+            width=9,
+            height=1,
+            relief=tk.FLAT,
+            bd=0,
+            cursor="hand2"
+        )
+        self.cancel_btn.pack(side=tk.LEFT)
+        
+    def toggle_theme(self):
+        """切换深色/浅色主题"""
+        self.is_dark_theme = not self.is_dark_theme
+        
+        if self.is_dark_theme:
+            # 深色主题配色
+            self.apply_dark_theme()
+        else:
+            # 浅色主题配色
+            self.apply_light_theme()
+    
+    def apply_dark_theme(self):
+        """应用深色主题配色"""
+        # 主窗口和主框架
+        self.root.config(bg="#2c3e50")
+        self.main_frame.config(bg="#2c3e50")
+        
+        # 标题栏（Windows系统）
+        try:
+            import ctypes
+            from ctypes import wintypes
+            # 获取窗口句柄
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
+            # 设置深色标题栏（Windows 10/11）
+            DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+            value = ctypes.c_int(1)  # 1为深色模式
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, 
+                ctypes.byref(value), ctypes.sizeof(value)
+            )
+        except:
+            pass
+        
+        # 工作汇报区域
+        self.report_frame.config(bg="#34495e", fg="#ecf0f1")
+        self.report_text.config(bg="#2c3e50", fg="#ecf0f1", selectbackground="#3498db")
+        
+        # 文字反馈区域
+        self.feedback_frame.config(bg="#34495e", fg="#ecf0f1")
+        self.text_widget.config(bg="#2c3e50", fg="#ecf0f1", insertbackground="#ecf0f1")
+        
+        # 图片反馈区域
+        if hasattr(self, 'image_title_frame'):
+            self.image_title_frame.config(bg="#2c3e50")
+        if hasattr(self, 'image_title_label'):
+            self.image_title_label.config(bg="#34495e", fg="#ecf0f1")
+        if hasattr(self, 'image_frame'):
+            self.image_frame.config(bg="#34495e", fg="#ecf0f1")
+        if hasattr(self, 'btn_frame'):
+            self.btn_frame.config(bg="#34495e")
+        if hasattr(self, 'select_file_btn'):
+            self.select_file_btn.config(bg="#2980b9", fg="#ffffff")
+        if hasattr(self, 'paste_btn'):
+            self.paste_btn.config(bg="#27ae60", fg="#ffffff")
+        if hasattr(self, 'clear_btn'):
+            self.clear_btn.config(bg="#c0392b", fg="#ffffff")
+        if hasattr(self, 'preview_container'):
+            self.preview_container.config(bg="#34495e")
+        if hasattr(self, 'canvas'):
+            self.canvas.config(bg="#2c3e50")
+        if hasattr(self, 'image_preview_frame'):
+            self.image_preview_frame.config(bg="#2c3e50")
+        
+        # 底部区域
+        self.bottom_frame.config(bg="#2c3e50")
+        self.info_label.config(bg="#2c3e50", fg="#bdc3c7")
+        self.button_frame.config(bg="#2c3e50")
+        
+        # 主题按钮（增强视觉效果）
+        self.theme_btn.config(
+            text="☀️", 
+            bg="#34495e", 
+            fg="#f39c12",
+            activebackground="#2c3e50",
+            activeforeground="#f1c40f"
+        )
+        
+        # 提交取消按钮
+        self.submit_btn.config(bg="#27ae60", fg="#ffffff")
+        self.cancel_btn.config(bg="#e74c3c", fg="#ffffff")
+    
+    def apply_light_theme(self):
+        """应用浅色主题配色"""
+        # 主窗口和主框架
+        self.root.config(bg="#ffffff")
+        self.main_frame.config(bg="#ffffff")
+        
+        # 标题栏（Windows系统）
+        try:
+            import ctypes
+            from ctypes import wintypes
+            # 获取窗口句柄
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
+            # 设置浅色标题栏（Windows 10/11）
+            DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+            value = ctypes.c_int(0)  # 0为浅色模式
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, 
+                ctypes.byref(value), ctypes.sizeof(value)
+            )
+        except:
+            pass
+        
+        # 工作汇报区域
+        self.report_frame.config(bg="#ffffff", fg="#2c3e50")
+        self.report_text.config(bg="#f8f9fa", fg="#2c3e50", selectbackground="#3498db")
+        
+        # 文字反馈区域
+        self.feedback_frame.config(bg="#ffffff", fg="#34495e")
+        self.text_widget.config(bg="#ffffff", fg="#2c3e50", insertbackground="#2c3e50")
+        
+        # 图片反馈区域
+        if hasattr(self, 'image_title_frame'):
+            self.image_title_frame.config(bg="#f5f5f5")
+        if hasattr(self, 'image_title_label'):
+            self.image_title_label.config(bg="#ecf0f1", fg="#34495e")
+        if hasattr(self, 'image_frame'):
+            self.image_frame.config(bg="#ffffff", fg="#34495e")
+        if hasattr(self, 'btn_frame'):
+            self.btn_frame.config(bg="#ffffff")
+        if hasattr(self, 'select_file_btn'):
+            self.select_file_btn.config(bg="#3498db", fg="white")
+        if hasattr(self, 'paste_btn'):
+            self.paste_btn.config(bg="#2ecc71", fg="white")
+        if hasattr(self, 'clear_btn'):
+            self.clear_btn.config(bg="#e74c3c", fg="white")
+        if hasattr(self, 'preview_container'):
+            self.preview_container.config(bg="#ffffff")
+        if hasattr(self, 'canvas'):
+            self.canvas.config(bg="#f8f9fa")
+        if hasattr(self, 'image_preview_frame'):
+            self.image_preview_frame.config(bg="#f8f9fa")
+        
+        # 底部区域
+        self.bottom_frame.config(bg="#ffffff")
+        self.info_label.config(bg="#ffffff", fg="#7f8c8d")
+        self.button_frame.config(bg="#ffffff")
+        
+        # 主题按钮（增强视觉效果）
+        self.theme_btn.config(
+            text="🌙", 
+            bg="#ecf0f1", 
+            fg="#34495e",
+            activebackground="#d5dbdb",
+            activeforeground="#2c3e50"
+        )
+        
+        # 提交取消按钮
+        self.submit_btn.config(bg="#27ae60", fg="white")
+        self.cancel_btn.config(bg="#95a5a6", fg="white")
+    
+    def toggle_image_frame(self, event=None):
+        """切换图片反馈区域的显示状态"""
+        if self.image_frame_visible:
+            # 隐藏图片区域
+            self.image_frame.pack_forget()
+            self.image_title_label.config(text="🖼️ 图片反馈（点击展开/收起）")
+            self.image_frame_visible = False
+        else:
+            # 显示图片区域
+            self.image_frame.pack(fill=tk.X, pady=(0, 15))
+            self.image_title_label.config(text="🖼️ 图片反馈（点击收起）")
+            self.image_frame_visible = True
+    
+    def setup_markdown_tags(self):
+        """设置Markdown样式标签"""
+        # 标题样式
+        self.report_text.tag_configure("h1", font=("Microsoft YaHei", 16, "bold"), foreground="#2c3e50")
+        self.report_text.tag_configure("h2", font=("Microsoft YaHei", 14, "bold"), foreground="#34495e")
+        self.report_text.tag_configure("h3", font=("Microsoft YaHei", 12, "bold"), foreground="#34495e")
+        
+        # 代码样式
+        self.report_text.tag_configure("code", font=("Consolas", 9), background="#f1f2f6", foreground="#e74c3c")
+        self.report_text.tag_configure("code_block", font=("Consolas", 9), background="#f1f2f6", foreground="#2c3e50")
+        
+        # 强调样式
+        self.report_text.tag_configure("bold", font=("Microsoft YaHei", 10, "bold"))
+        self.report_text.tag_configure("italic", font=("Microsoft YaHei", 10, "italic"))
+        
+        # 列表样式
+        self.report_text.tag_configure("list", lmargin1=20, lmargin2=20)
+        
+    def set_markdown_content(self, content):
+        """设置Markdown内容并应用样式"""
+        self.report_text.config(state=tk.NORMAL)
+        self.report_text.delete(1.0, tk.END)
+        
+        if not content:
+            self.report_text.insert(tk.END, "本次对话中完成的工作内容...")
+            self.report_text.config(state=tk.DISABLED)
+            return
+            
+        lines = content.split('\n')
+        current_pos = 1.0
+        
+        for line in lines:
+            line_start = self.report_text.index(tk.INSERT)
+            
+            # 处理标题
+            if line.startswith('### '):
+                self.report_text.insert(tk.END, line[4:] + '\n')
+                line_end = self.report_text.index(tk.INSERT + ' -1c')
+                self.report_text.tag_add("h3", line_start, line_end)
+            elif line.startswith('## '):
+                self.report_text.insert(tk.END, line[3:] + '\n')
+                line_end = self.report_text.index(tk.INSERT + ' -1c')
+                self.report_text.tag_add("h2", line_start, line_end)
+            elif line.startswith('# '):
+                self.report_text.insert(tk.END, line[2:] + '\n')
+                line_end = self.report_text.index(tk.INSERT + ' -1c')
+                self.report_text.tag_add("h1", line_start, line_end)
+            # 处理代码块
+            elif line.startswith('```'):
+                self.report_text.insert(tk.END, line + '\n')
+                line_end = self.report_text.index(tk.INSERT + ' -1c')
+                self.report_text.tag_add("code_block", line_start, line_end)
+            # 处理列表
+            elif line.startswith('- ') or line.startswith('* ') or re.match(r'^\d+\. ', line):
+                self.report_text.insert(tk.END, line + '\n')
+                line_end = self.report_text.index(tk.INSERT + ' -1c')
+                self.report_text.tag_add("list", line_start, line_end)
+            else:
+                # 处理行内样式
+                processed_line = self.process_inline_markdown(line)
+                self.report_text.insert(tk.END, processed_line + '\n')
+                
+        self.report_text.config(state=tk.DISABLED)
+        
+    def process_inline_markdown(self, line):
+        """处理行内Markdown样式"""
+        # 处理行内代码
+        line = re.sub(r'`([^`]+)`', r'\1', line)
+        
+        # 处理粗体
+        line = re.sub(r'\*\*([^*]+)\*\*', r'\1', line)
+        
+        # 处理斜体
+        line = re.sub(r'\*([^*]+)\*', r'\1', line)
+        
+        return line
         
     def clear_placeholder(self, event):
         """清除占位符文本"""
@@ -595,4 +911,4 @@ if __name__ == "__main__":
 
 def main():
     """Main entry point for the mcp-feedback-collector command."""
-    mcp.run() 
+    mcp.run()
